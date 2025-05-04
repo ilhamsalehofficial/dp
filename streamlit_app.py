@@ -1,152 +1,178 @@
-import streamlit as st
 import pandas as pd
-import numpy as np
+import folium
+import streamlit as st
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import seaborn as sns
-import pydeck as pdk
+from io import BytesIO
 
-st.set_page_config(page_title="Dashboard Clustering UMKM", layout="wide")
-st.title("📊 Dashboard Interaktif Clustering dan Pemetaan UMKM")
+# ========================== Data Login Sementara
+USERS = {
+    "admin": "admin123",
+    "ilham": "umkm2025"
+}
 
-# Upload file CSV
-uploaded_file = st.file_uploader("📤 Unggah file CSV data UMKM", type="csv")
+def login(username, password):
+    return USERS.get(username) == password
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    
-    with st.expander("📋 Lihat Data Awal"):
-        st.dataframe(df, use_container_width=True)
+# ========================== Fungsi Halaman Utama
+def main_app():
+    st.title('📊 Pemetaan UMKM dengan K-Means dan SIG')
 
-    numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
+    wilayah_sumsel = [
+        'Palembang', 'Prabumulih', 'Pagar Alam', 'Lahat', 'Muara Enim', 'Baturaja',
+        'Tanjung Enim', 'Indralaya', 'Muaradua', 'Banyuasin', 'Ogan Ilir', 'Ogan Komering Ilir'
+    ]
 
-    st.subheader("⚙️ Pilih Variabel dan Konfigurasi Clustering")
-    col1, col2 = st.columns(2)
-    with col1:
-        features = st.multiselect("🔢 Pilih kolom numerik:", options=numeric_cols, default=numeric_cols)
-    with col2:
-        k = st.slider("📍 Jumlah Cluster (K)", 2, 10, 3)
+    st.sidebar.subheader("⚙️ Filter Wilayah")
+    selected_wilayah = st.sidebar.selectbox("Pilih Wilayah", ["Semua Wilayah"] + wilayah_sumsel)
 
-    if len(features) >= 2:
-        X = df[features]
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
+    jalan_wilayah = {
+        'Palembang': ['Jalan Merdeka', 'Jalan Pahlawan', 'Jalan Jenderal Sudirman'],
+        'Prabumulih': ['Jalan Raya', 'Jalan Sudirman'],
+        'Pagar Alam': ['Jalan Pantai', 'Jalan Raya Pagar Alam'],
+        'Lahat': ['Jalan Lahat Raya', 'Jalan Sudirman'],
+        'Muara Enim': ['Jalan Muara Enim', 'Jalan Raya Enim'],
+        'Baturaja': ['Jalan Baturaja Utara', 'Jalan Baturaja Selatan'],
+        'Tanjung Enim': ['Jalan Tanjung Enim'],
+        'Indralaya': ['Jalan Indralaya'],
+        'Muaradua': ['Jalan Raya Muaradua'],
+        'Banyuasin': ['Jalan Raya Banyuasin'],
+        'Ogan Ilir': ['Jalan Ogan Ilir'],
+        'Ogan Komering Ilir': ['Jalan Ogan Komering Ilir']
+    }
 
-        kmeans = KMeans(n_clusters=k, random_state=42)
-        df['Cluster'] = kmeans.fit_predict(X_scaled)
-
-        with st.expander("📁 Data Setelah Clustering"):
-            st.dataframe(df, use_container_width=True)
-
-        st.subheader("📈 Visualisasi Cluster (2D)")
-        x_axis = st.selectbox("Sumbu X", features, index=0)
-        y_axis = st.selectbox("Sumbu Y", features, index=1)
-
-        palette = sns.color_palette("tab10", k)
-        fig, ax = plt.subplots(figsize=(6, 4))
-        sns.scatterplot(data=df, x=x_axis, y=y_axis, hue='Cluster', palette=palette, s=70, ax=ax)
-        plt.title("Visualisasi Klaster UMKM", fontsize=12)
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        st.pyplot(fig)
-
-        # Rekomendasi
-        st.subheader("🧠 Rekomendasi Pengembangan UMKM per Klaster")
-        cluster_summary = df.groupby('Cluster')[features].mean().reset_index()
-        st.dataframe(cluster_summary, use_container_width=True)
-
-        with st.expander("📦 Detail Rekomendasi per Klaster"):
-            for idx, row in cluster_summary.iterrows():
-                st.markdown(f"#### 🟡 Klaster {int(row['Cluster'])}")
-                rekomendasi = ""
-
-                if 'Omzet_Bulanan' in row:
-                    if row['Omzet_Bulanan'] < 10:
-                        rekomendasi += "- Fokus pada pelatihan pemasaran digital dan branding produk.\n"
-                    elif row['Omzet_Bulanan'] > 50:
-                        rekomendasi += "- Siap untuk ekspansi usaha dan kemitraan distribusi regional.\n"
-                    else:
-                        rekomendasi += "- Dorong efisiensi produksi dan perluas akses ke permodalan.\n"
-
-                if 'Jumlah_Karyawan' in row:
-                    if row['Jumlah_Karyawan'] <= 2:
-                        rekomendasi += "- Perlu perekrutan atau pelatihan staf tambahan.\n"
-                    elif row['Jumlah_Karyawan'] >= 10:
-                        rekomendasi += "- Implementasi sistem manajemen usaha dan SOP lebih lanjut.\n"
-
-                if 'Lama_Usaha' in row:
-                    if row['Lama_Usaha'] < 3:
-                        rekomendasi += "- Pendampingan intensif dan inkubasi bisnis.\n"
-                    elif row['Lama_Usaha'] >= 10:
-                        rekomendasi += "- Siap untuk sertifikasi usaha dan masuk pasar nasional/internasional.\n"
-
-                st.markdown(rekomendasi)
-
-        # Pemetaan
-        st.subheader("🗺️ Pemetaan UMKM Berdasarkan Lokasi")
-        if 'Latitude' in df.columns and 'Longitude' in df.columns:
-            cluster_colors = {
-                0: [255, 0, 0],
-                1: [0, 255, 0],
-                2: [0, 0, 255],
-                3: [255, 255, 0],
-                4: [255, 0, 255],
-                5: [0, 255, 255],
-                6: [128, 0, 128],
-                7: [255, 165, 0],
-                8: [0, 128, 0],
-                9: [128, 128, 0]
-            }
-
-            df['Cluster_color'] = df['Cluster'].apply(lambda x: cluster_colors.get(x, [100, 100, 100]))
-
-            tooltip = {
-                "html": "<b>Nama Usaha:</b> {Nama_Usaha}<br/>"
-                        "<b>Omzet Bulanan:</b> {Omzet_Bulanan} Juta<br/>"
-                        "<b>Jumlah Karyawan:</b> {Jumlah_Karyawan}<br/>"
-                        "<b>Lama Usaha:</b> {Lama_Usaha} Tahun<br/>"
-                        "<b>Klaster:</b> {Cluster}",
-                "style": {
-                    "backgroundColor": "steelblue",
-                    "color": "white"
-                }
-            }
-
-            layer = pdk.Layer(
-                'ScatterplotLayer',
-                data=df,
-                get_position='[Longitude, Latitude]',
-                get_color='Cluster_color',
-                get_radius=200,
-                pickable=True
-            )
-
-            view_state = pdk.ViewState(
-                latitude=df['Latitude'].mean(),
-                longitude=df['Longitude'].mean(),
-                zoom=7.5,
-                pitch=0,
-            )
-
-            map_chart = pdk.Deck(
-                map_style='mapbox://styles/mapbox/light-v9',
-                layers=[layer],
-                initial_view_state=view_state,
-                tooltip=tooltip
-            )
-
-            st.pydeck_chart(map_chart, use_container_width=True)
-
-            with st.expander("🎨 Legenda Warna Klaster"):
-                for cluster_id in sorted(df['Cluster'].unique()):
-                    color = cluster_colors.get(cluster_id, [100, 100, 100])
-                    hex_color = '#%02x%02x%02x' % tuple(color)
-                    st.markdown(f"<span style='color:{hex_color}; font-weight:bold;'>●</span> Klaster {cluster_id}",
-                                unsafe_allow_html=True)
-        else:
-            st.warning("📍 Data belum memiliki kolom 'Latitude' dan 'Longitude' untuk ditampilkan di peta.")
+    if selected_wilayah != "Semua Wilayah":
+        selected_jalan = st.sidebar.selectbox(f"Pilih Jalan di {selected_wilayah}", jalan_wilayah[selected_wilayah])
     else:
-        st.warning("⚠️ Pilih minimal 2 variabel untuk clustering.")
-else:
-    st.info("⬆️ Silakan unggah file CSV terlebih dahulu.")
+        selected_jalan = None
+
+    uploaded_file = st.file_uploader("📂 Upload File CSV", type=["csv"])
+
+    if uploaded_file is not None:
+        data = pd.read_csv(uploaded_file)
+
+        required_columns = ['nama_umkm', 'latitude', 'longitude', 'omset_tahunan', 'kategori_usaha', 'kabupaten']
+        missing_columns = [col for col in required_columns if col not in data.columns]
+        if missing_columns:
+            st.error(f"❌ Kolom berikut tidak ditemukan di file CSV: {', '.join(missing_columns)}")
+            st.stop()
+
+        data = data.dropna(subset=required_columns)
+        data = data.drop_duplicates()
+
+        if selected_wilayah != "Semua Wilayah":
+            data = data[data['kabupaten'] == selected_wilayah]
+
+        st.subheader("🔍 Data UMKM")
+        st.write(data)
+
+        data['omset_asli'] = data['omset_tahunan']
+        kategori_mapping = {'Perdagangan': 0, 'Jasa': 1, 'Manufaktur': 2}
+        data['kategori_usaha_numerik'] = data['kategori_usaha'].map(kategori_mapping)
+
+        if data['kategori_usaha_numerik'].isnull().any():
+            st.warning("⚠️ Ada kategori usaha yang belum terdaftar dalam mapping.")
+
+        scaler = StandardScaler()
+        data['omset_tahunan_norm'] = scaler.fit_transform(data[['omset_tahunan']])
+
+        n_samples = len(data)
+        max_clusters = min(10, n_samples)
+        st.sidebar.subheader("⚙️ Pengaturan Klaster")
+        n_clusters = st.sidebar.slider("Jumlah Klaster", min_value=2, max_value=max_clusters, value=3)
+
+        X = data[['omset_tahunan_norm', 'kategori_usaha_numerik']]
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        data['cluster'] = kmeans.fit_predict(X)
+        data['klaster'] = data['cluster'].apply(lambda x: f"Klaster {x + 1}")
+
+        st.subheader("📊 Hasil Klasterisasi UMKM")
+        st.write(data[['nama_umkm', 'omset_asli', 'kategori_usaha', 'klaster']])
+
+        st.subheader("📦 Distribusi Omset per Klaster")
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(x='klaster', y='omset_asli', data=data, palette='pastel')
+        plt.xlabel("Klaster")
+        plt.ylabel("Omset (Rp)")
+        plt.title("Distribusi Omset Berdasarkan Klaster")
+        st.pyplot(plt)
+
+        st.subheader("📍 Visualisasi Klaster dan Centroid")
+        centroids = kmeans.cluster_centers_
+        plt.figure(figsize=(10, 6))
+        sns.scatterplot(x='omset_tahunan_norm', y='kategori_usaha_numerik',
+                        hue='klaster', data=data, palette='Set2', s=80)
+        plt.scatter(centroids[:, 0], centroids[:, 1], marker='X', s=200, color='black', label='Centroid')
+        plt.xlabel("Omset (Ternormalisasi)")
+        plt.ylabel("Kategori Usaha (Numerik)")
+        plt.title("Hasil K-Means Clustering")
+        plt.legend()
+        st.pyplot(plt)
+
+        st.subheader("🗺️ Peta Lokasi UMKM")
+        cluster_colors = ['blue', 'green', 'red', 'purple', 'orange', 'darkred',
+                          'cadetblue', 'darkgreen', 'pink', 'gray']
+        map_center = [data['latitude'].mean(), data['longitude'].mean()]
+        m = folium.Map(location=map_center, zoom_start=12)
+
+        for _, row in data.iterrows():
+            cluster_idx = int(row['cluster']) % len(cluster_colors)
+            color = cluster_colors[cluster_idx]
+            folium.Marker(
+                location=[row['latitude'], row['longitude']],
+                popup=(f"Nama UMKM: {row['nama_umkm']}<br>"
+                       f"Klaster: {row['klaster']}<br>"
+                       f"Omset: Rp{int(row['omset_asli']):,}<br>"
+                       f"Usaha: {row['kategori_usaha']}"),
+                icon=folium.Icon(color=color)
+            ).add_to(m)
+
+        st.components.v1.html(m._repr_html_(), height=500)
+
+        m.save("umkm_map.html")
+        st.download_button("📥 Download Peta (HTML)", open("umkm_map.html", "r").read(),
+                           file_name="umkm_map.html", mime="text/html")
+
+        st.subheader("📁 Simpan Hasil Klasterisasi ke Excel")
+        output_excel = BytesIO()
+        data.to_excel(output_excel, index=False, sheet_name="Hasil Klaster")
+        st.download_button(
+            label="📥 Download Excel",
+            data=output_excel.getvalue(),
+            file_name="hasil_klaster_umkm.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+# ========================== Aplikasi dengan Login
+def main():
+    st.set_page_config(page_title="Login UMKM", layout="centered")
+
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+    if "username" not in st.session_state:
+        st.session_state.username = ""
+
+    if not st.session_state.logged_in:
+        st.title("🔐 Login")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            if login(username, password):
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.success(f"Selamat datang, {username}!")
+                st.rerun()
+            else:
+                st.error("Username atau password salah.")
+    else:
+        st.sidebar.success(f"Login sebagai: {st.session_state.username}")
+        if st.sidebar.button("Logout"):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.rerun()
+        main_app()
+
+if __name__ == "__main__":
+    main()
