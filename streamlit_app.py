@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from io import BytesIO
 
-# ========================== Data Login Sementara
+# ========== Login Sederhana
 USERS = {
     "admin": "admin123",
     "ilham": "umkm2025"
@@ -16,7 +16,7 @@ USERS = {
 def login(username, password):
     return USERS.get(username) == password
 
-# ========================== Fungsi Halaman Utama
+# ========== Halaman Utama
 def main_app():
     st.title('📊 Pemetaan UMKM dengan K-Means dan SIG')
 
@@ -28,35 +28,18 @@ def main_app():
     st.sidebar.subheader("⚙️ Filter Wilayah")
     selected_wilayah = st.sidebar.selectbox("Pilih Wilayah", ["Semua Wilayah"] + wilayah_sumsel)
 
-    jalan_wilayah = {
-        'Palembang': ['Jalan Merdeka', 'Jalan Pahlawan', 'Jalan Jenderal Sudirman'],
-        'Prabumulih': ['Jalan Raya', 'Jalan Sudirman'],
-        'Pagar Alam': ['Jalan Pantai', 'Jalan Raya Pagar Alam'],
-        'Lahat': ['Jalan Lahat Raya', 'Jalan Sudirman'],
-        'Muara Enim': ['Jalan Muara Enim', 'Jalan Raya Enim'],
-        'Baturaja': ['Jalan Baturaja Utara', 'Jalan Baturaja Selatan'],
-        'Tanjung Enim': ['Jalan Tanjung Enim'],
-        'Indralaya': ['Jalan Indralaya'],
-        'Muaradua': ['Jalan Raya Muaradua'],
-        'Banyuasin': ['Jalan Raya Banyuasin'],
-        'Ogan Ilir': ['Jalan Ogan Ilir'],
-        'Ogan Komering Ilir': ['Jalan Ogan Komering Ilir']
-    }
-
-    if selected_wilayah != "Semua Wilayah":
-        selected_jalan = st.sidebar.selectbox(f"Pilih Jalan di {selected_wilayah}", jalan_wilayah[selected_wilayah])
-    else:
-        selected_jalan = None
-
     uploaded_file = st.file_uploader("📂 Upload File CSV", type=["csv"])
 
     if uploaded_file is not None:
         data = pd.read_csv(uploaded_file)
 
-        required_columns = ['nama_umkm', 'latitude', 'longitude', 'omset_tahunan', 'kategori_usaha', 'kabupaten']
-        missing_columns = [col for col in required_columns if col not in data.columns]
-        if missing_columns:
-            st.error(f"❌ Kolom berikut tidak ditemukan di file CSV: {', '.join(missing_columns)}")
+        required_columns = [
+            'nama_umkm', 'no_telpon', 'alamat', 'latitude', 'longitude',
+            'deskripsi', 'kategori_usaha', 'omset_tahunan', 'kabupaten'
+        ]
+        missing = [col for col in required_columns if col not in data.columns]
+        if missing:
+            st.error(f"❌ Kolom tidak ditemukan: {', '.join(missing)}")
             st.stop()
 
         data = data.dropna(subset=required_columns)
@@ -65,32 +48,43 @@ def main_app():
         if selected_wilayah != "Semua Wilayah":
             data = data[data['kabupaten'] == selected_wilayah]
 
-        st.subheader("🔍 Data UMKM")
-        st.write(data)
+        st.subheader("📋 Data Lengkap UMKM")
+        st.dataframe(data)
 
+        # ========== Pra-pemrosesan Data
         data['omset_asli'] = data['omset_tahunan']
-        kategori_mapping = {'Perdagangan': 0, 'Jasa': 1, 'Manufaktur': 2}
+
+        kategori_mapping = {
+            'Perdagangan': 0, 'Jasa': 1, 'Manufaktur': 2,
+            'Makanan': 3, 'Fashion': 4, 'Kerajinan': 5
+        }
         data['kategori_usaha_numerik'] = data['kategori_usaha'].map(kategori_mapping)
 
         if data['kategori_usaha_numerik'].isnull().any():
-            st.warning("⚠️ Ada kategori usaha yang belum terdaftar dalam mapping.")
+            st.warning("⚠️ Ada kategori usaha yang tidak dikenal. Tambahkan ke mapping.")
 
         scaler = StandardScaler()
         data['omset_tahunan_norm'] = scaler.fit_transform(data[['omset_tahunan']])
 
+        # ========== Klasterisasi
         n_samples = len(data)
         max_clusters = min(10, n_samples)
         st.sidebar.subheader("⚙️ Pengaturan Klaster")
-        n_clusters = st.sidebar.slider("Jumlah Klaster", min_value=2, max_value=max_clusters, value=3)
+        n_clusters = st.sidebar.slider("Jumlah Klaster", 2, max_clusters, value=3)
 
         X = data[['omset_tahunan_norm', 'kategori_usaha_numerik']]
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         data['cluster'] = kmeans.fit_predict(X)
         data['klaster'] = data['cluster'].apply(lambda x: f"Klaster {x + 1}")
 
+        # ========== Tabel Hasil Klasterisasi
         st.subheader("📊 Hasil Klasterisasi UMKM")
-        st.write(data[['nama_umkm', 'omset_asli', 'kategori_usaha', 'klaster']])
+        st.write(data[[
+            'nama_umkm', 'alamat', 'no_telpon', 'deskripsi',
+            'kategori_usaha', 'omset_asli', 'klaster'
+        ]])
 
+        # ========== Visualisasi Boxplot
         st.subheader("📦 Distribusi Omset per Klaster")
         plt.figure(figsize=(10, 6))
         sns.boxplot(x='klaster', y='omset_asli', data=data, palette='pastel')
@@ -99,6 +93,7 @@ def main_app():
         plt.title("Distribusi Omset Berdasarkan Klaster")
         st.pyplot(plt)
 
+        # ========== Visualisasi Centroid
         st.subheader("📍 Visualisasi Klaster dan Centroid")
         centroids = kmeans.cluster_centers_
         plt.figure(figsize=(10, 6))
@@ -111,6 +106,7 @@ def main_app():
         plt.legend()
         st.pyplot(plt)
 
+        # ========== Peta Lokasi
         st.subheader("🗺️ Peta Lokasi UMKM")
         cluster_colors = ['blue', 'green', 'red', 'purple', 'orange', 'darkred',
                           'cadetblue', 'darkgreen', 'pink', 'gray']
@@ -118,11 +114,10 @@ def main_app():
         m = folium.Map(location=map_center, zoom_start=12)
 
         for _, row in data.iterrows():
-            cluster_idx = int(row['cluster']) % len(cluster_colors)
-            color = cluster_colors[cluster_idx]
+            color = cluster_colors[int(row['cluster']) % len(cluster_colors)]
             folium.Marker(
                 location=[row['latitude'], row['longitude']],
-                popup=(f"Nama UMKM: {row['nama_umkm']}<br>"
+                popup=(f"<b>{row['nama_umkm']}</b><br>"
                        f"Klaster: {row['klaster']}<br>"
                        f"Omset: Rp{int(row['omset_asli']):,}<br>"
                        f"Usaha: {row['kategori_usaha']}"),
@@ -131,10 +126,14 @@ def main_app():
 
         st.components.v1.html(m._repr_html_(), height=500)
 
+        # ========== Download Peta
         m.save("umkm_map.html")
-        st.download_button("📥 Download Peta (HTML)", open("umkm_map.html", "r").read(),
-                           file_name="umkm_map.html", mime="text/html")
+        st.download_button("📥 Download Peta (HTML)",
+                           open("umkm_map.html", "r").read(),
+                           file_name="umkm_map.html",
+                           mime="text/html")
 
+        # ========== Download Excel
         st.subheader("📁 Simpan Hasil Klasterisasi ke Excel")
         output_excel = BytesIO()
         data.to_excel(output_excel, index=False, sheet_name="Hasil Klaster")
@@ -145,7 +144,7 @@ def main_app():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-# ========================== Aplikasi dengan Login
+# ========== Fungsi Login
 def main():
     st.set_page_config(page_title="Login UMKM", layout="centered")
 
